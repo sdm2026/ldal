@@ -1,136 +1,132 @@
-# Cost-Sensitive Learning (CSL) Loss Function
+# Learning-Dynamics Aware Loss (LDAL)
 
-This repository contains the code for training machine learning models using a novel Cost-Sensitive Learning (CSL) loss function designed to handle class imbalance effectively. The code is modular and has been tested on multiple datasets, including ImageNet-LT, CIFAR-10, CIFAR-100, Tiny ImageNet and iNaturalist2018.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=flat&logo=PyTorch&logoColor=white)](https://pytorch.org/)
 
-## Datasets
-The following datasets are supported and can be used for training and evaluation:
-- ImageNet-LT
-- iNaturalist2018
-- CIFAR-10
-- CIFAR-100
-- Tiny ImageNet
+This repository contains the official PyTorch implementation for our paper introducing the **Learning-Dynamics Aware Loss (LDAL)** framework. 
 
-## Getting Started
+LDAL is a novel, plug-and-play loss function designed to handle severe class imbalance in long-tailed visual recognition tasks. Moving beyond static, frequency-based reweighting, LDAL dynamically adjusts class penalties during training by leveraging real-time feature representation strength (semantic scale), intrinsic learning difficulty (Shannon entropy), and an inter-epoch regularization penalty to prevent premature convergence to head-class-dominated local minima.
 
-Follow these instructions to set up and run the project.
+##  Supported Datasets
+The repository currently supports training and evaluation on the following standard long-tailed benchmarks:
+- **ImageNet-LT**
+- **iNaturalist 2018**
+- **CIFAR-10-LT**
+- **CIFAR-100-LT**
+- **Tiny ImageNet-LT**
+
+---
+
+##  Getting Started
+
+Follow these instructions to set up the environment and run the experiments.
 
 ### 1. Clone the Repository
-
-Clone the repository using the following command:
-
 ```bash
-git clone https://github.com/iclr-sub/csl.git
-cd csl
+git clone https://github.com/iclr-sub/ldal.git
+cd ldal
 ```
 
-### 2. Create and Activate Virtual Environment
-
-To ensure package compatibility, create a virtual environment:
-
+### 2. Environment Setup
+We recommend using a virtual environment to manage dependencies:
 ```bash
-python -m venv csl_env
+python -m venv ldal_env
 ```
 
-Activate the virtual environment:
-
-- On Windows:
-    ```bash
-    csl_env\Scripts\activate
-    ```
-- On Unix/macOS:
-    ```bash
-    source csl_env/bin/activate
-    ```
+**Activate the environment:**
+- **Windows:**
+  ```bash
+  ldal_env\Scripts\activate
+  ```
+- **Unix/macOS:**
+  ```bash
+  source ldal_env/bin/activate
+  ```
 
 ### 3. Install Dependencies
-
-Install the required dependencies specified in the `requirements.txt` file:
-
+Install the required packages via `requirements.txt`:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Prepare Datasets
+### 4. Dataset Preparation
+Download and extract the required datasets into the `datasets/` directory. The directory structure must follow this exact hierarchy for the dataloaders to function correctly:
 
-Place the required datasets in the `datasets/` directory. The structure should follow this pattern:
-
-```
+```text
 datasets/
-    ImageNet_LT/
-    INaturalist18/
-    CIFAR-10/
-    CIFAR-100/
-    TinyImageNet/
+    ├── ImageNet_LT/
+    ├── INaturalist18/
+    ├── CIFAR-10/
+    ├── CIFAR-100/
+    └── TinyImageNet/
 ```
+*(Note: Please refer to the specific dataset loader scripts in `dataloaders/` for exact annotation file requirements).*
 
-Ensure the appropriate images and labels are placed correctly for each dataset. You can refer to the dataset loader files for more details on the format required.
+---
 
-### 5. Training the Model on ImageNet-LT or iNaturalist2018
+##  Training and Evaluation
 
-To train models using the ImageNet-LT or iNaturalist datasets, use the `main.py` script. You can customize the dataset, model, batch size, and other hyperparameters as needed.
+### Large-Scale Datasets (ImageNet-LT & iNaturalist 2018)
+To train models on the larger datasets, utilize the `main.py` script. You can configure the dataset, backbone architecture, and hyperparameters via command-line arguments.
 
+**Example: Training ResNet-50 on ImageNet-LT**
 ```bash
 python main.py --dataset_name imagenet --model_name resnet50 
 ```
 
-Example for training on iNaturalist with ResNet-50:
-
+**Example: Training ResNet-50 on iNaturalist 2018**
 ```bash
 python main.py --dataset_name inaturalist --model_name resnet50
 ```
 
-### 6. Running Experiments on CIFAR-10, CIFAR-100, and Tiny ImageNet
+#### Command-Line Arguments:
+- `--dataset_name`: Target dataset (`imagenet`, `inaturalist`).
+- `--model_name`: Backbone architecture (`resnet32`, `resnet50`, `resnext50`, `resnext101`).
+- `--batch_size`: Batch size for training (default: `256`).
+- `--num_epochs`: Total number of training epochs (default: `200`).
+- `--learning_rate`: Initial learning rate (default: `0.01`).
+- `--data_path`: Path to the root datasets directory (default: `datasets/`).
 
-We provide Jupyter notebooks for training and evaluating models on CIFAR-10, CIFAR-100, and Tiny ImageNet. You can execute these notebooks directly by opening them in Jupyter:
+### Standard Benchmarks (CIFAR & Tiny ImageNet)
+For rapid experimentation and evaluation on CIFAR and Tiny ImageNet, we provide dedicated Jupyter Notebooks. These notebooks contain complete end-to-end training loops and visualization code.
 
-- **`cifar_10.ipynb`**
-- **`cifar_100.ipynb`**
-- **`tiny_imagenet.ipynb`**
-
-To start the Jupyter environment:
-
+Start your Jupyter environment:
 ```bash
 jupyter notebook
 ```
+Navigate to the `notebooks/` directory and execute the desired experiment:
+- `cifar_10.ipynb`
+- `cifar_100.ipynb`
+- `tiny_imagenet.ipynb`
 
-Open the relevant notebook and run the cells to execute the experiments.
+---
 
-### Code Structure
+##  Repository Structure
 
-The repository is organized as follows:
-
-```
-├── datasets/                   # Datasets directory (not  included in the repo)
+```text
+├── datasets/                   # Root directory for all dataset files (Not tracked by Git)
 ├── dataloaders/
 │   ├── __init__.py
 │   ├── ImageNet_LT/
 │   ├── Inaturalist18/
-│   ├── imagenet_lt_loader.py    # ImageNet-LT dataset loader
-│   └── inaturalist_loader.py    # iNaturalist dataset loader
+│   ├── imagenet_lt_loader.py   # ImageNet-LT specific dataloader
+│   └── inaturalist_loader.py   # iNaturalist 2018 specific dataloader
 ├── models/
 │   ├── __init__.py
-│   ├── resnet.py                # ResNet model implementations
-│   └── resnext.py               # ResNeXt model implementations
+│   ├── resnet.py               # ResNet backbone implementations
+│   └── resnext.py              # ResNeXt backbone implementations
 ├── notebooks/
-│   ├── cifar_10.ipynb           # Experiment notebook for CIFAR-10
-│   ├── cifar_100.ipynb          # Experiment notebook for CIFAR-100
-│   └── tiny_imagenet.ipynb      # Experiment notebook for Tiny ImageNet
+│   ├── cifar_10.ipynb          # End-to-end experiment notebook for CIFAR-10-LT
+│   ├── cifar_100.ipynb         # End-to-end experiment notebook for CIFAR-100-LT
+│   └── tiny_imagenet.ipynb     # End-to-end experiment notebook for Tiny ImageNet-LT
 ├── utils/
 │   ├── __init__.py
-│   ├── csl_loss.py              # Implementation of the CSL loss function
-│   └── plot_utils.py            # Utility functions for plotting results
-├── main.py                      # Main training script
-├── requirements.txt             # Project dependencies
-└── README.md                    # This file
+│   ├── ldal_loss.py            # PyTorch implementation of the LDAL function
+│   └── plot_utils.py           # Visualization and metric tracking utilities
+├── main.py                     # Primary training script for large-scale datasets
+├── requirements.txt            # Python environment dependencies
+└── README.md                   # Repository documentation
 ```
 
-### Arguments for Training
-
-When running `main.py`, you can pass in various arguments to customize the training process:
-
-- `--dataset_name`: The dataset to use (`imagenet`, `inaturalist`).
-- `--model_name`: The model to use (`resnet32`, `resnet50`, `resnext50`, `resnext101`).
-- `--batch_size`: Batch size for training (default: 256).
-- `--num_epochs`: Number of training epochs (default: 200).
-- `--learning_rate`: Initial learning rate (default: 0.01).
-- `--data_path`: Path to the dataset directory (default: `datasets/`).
+*(Note: Citation will be updated upon publication).*
