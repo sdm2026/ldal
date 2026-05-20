@@ -20,6 +20,7 @@ def train(model, criterion, optimizer, scheduler, train_loader, val_loader, devi
         outputs = model(inputs)
         loss = criterion(labels, outputs, epoch)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         train_loss += loss.item() * inputs.size(0)
