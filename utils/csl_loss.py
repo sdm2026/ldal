@@ -1,109 +1,131 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
-
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 class AdditionalTermLayer(nn.Module):
-    def __init__(self, target_class_index, num_classes):
+    """
+    mode:
+      'full'            â†’ Full LDAL
+      'no_entropy'      â†’ gamma_i = S_i / (1 + max(S))    [H_i removed]
+      'no_regularizer'  â†’ r_i = 0 always
+      'no_semantic'     â†’ gamma_i = 1 / (1 + H_i)         [S_i removed]
+    """
+    def __init__(self, target_class_index, num_classes, mode='full'):
         super(AdditionalTermLayer, self).__init__()
         self.target_class_index = target_class_index
         self.num_classes = num_classes
+        self.mode = mode
         self.previous_epoch_class_predictions = None
-        self.feature_storage = {i: [] for i in range(num_classes)}
-        self.entropies = {i: [] for i in range(num_classes)}
+        self.current_epoch_class_predictions = None
+        self.current_epoch = -1
+        self.norm_sum = None
+        self.norm_count = None
+        self.entropy_sum = None
+        self.entropy_count = None
+        self._target_mask = None
+        self._device = None
 
-    def compute_entropy(self, class_predictions, num_samples):
-        """
-        Compute entropy for class i based on its predictions.
-        """
-        probabilities = class_predictions.float() / num_samples
-        non_zero_probs = probabilities[probabilities > 0]
-        entropy = -torch.sum(non_zero_probs * torch.log(non_zero_probs + 1e-6))  # Add small value to avoid log(0)
-        return entropy.item()
+    def _ensure_target_mask(self, device):
+        if self._target_mask is None or self._device != device:
+            mask = torch.zeros(self.num_classes, dtype=torch.bool, device=device)
+            for idx in self.target_class_index:
+                mask[idx] = True
+            self._target_mask = mask
+            self._device = device
 
     def forward(self, inputs, true_labels, epoch):
-        inputs = torch.nan_to_num(inputs)  # Replace NaNs with zero
-        additional_term = 0.0
+        inputs = torch.nan_to_num(inputs)
+        device = inputs.device
+        B, C = inputs.shape
 
-        class_predictions = torch.argmax(inputs, dim=-1)
+        if self.current_epoch != epoch:
+            if self.current_epoch_class_predictions is not None:
+                self.previous_epoch_class_predictions = self.current_epoch_class_predictions.clone()
+            self.current_epoch_class_predictions = torch.zeros(C, device=device)
+            self.norm_sum = torch.zeros(C, device=device)
+            self.norm_count = torch.zeros(C, device=device)
+            self.entropy_sum = torch.zeros(C, device=device)
+            self.entropy_count = torch.zeros(C, device=device)
+            self.current_epoch = epoch
 
-        # Store the current batch's features
-        for i in range(self.num_classes):
-            class_indices = (true_labels == i).nonzero(as_tuple=True)[0]
-            if class_indices.size(0) > 0: 
-                self.feature_storage[i].extend(inputs[class_indices].detach().cpu().numpy())
+        self._ensure_target_mask(device)
 
-        # Calculate the semantic scale for each class
-        semantic_scales = []
-        for features in self.feature_storage.values():
-            if len(features) > 0:
-                features = np.array(features)
-                avg_magnitude = np.mean(np.linalg.norm(features, axis=1))
-                semantic_scale = avg_magnitude ** 2
-                semantic_scales.append(semantic_scale)
-            else:
-                semantic_scales.append(0.0)
+        # 1. Soft predictions (differentiable)
+        probs = F.softmax(inputs, dim=-1)
+        batch_soft_predictions = probs.sum(dim=0) * (C / B)  # normalized: ~1.0 per class
+        with torch.no_grad():
+            hard_preds = inputs.argmax(dim=-1)
+            hard_counts = torch.zeros(C, device=device)
+            hard_counts.scatter_add_(0, hard_preds, torch.ones(B, device=device))
+            self.current_epoch_class_predictions += hard_counts
 
-        # Calculate class entropies
-        class_entropies = []
-        num_samples = len(true_labels)
-        for i in range(self.num_classes):
-            class_indices = (true_labels == i).nonzero(as_tuple=True)[0]
-            class_predictions_i = (class_predictions == i).float()
-            entropy = self.compute_entropy(class_predictions_i, num_samples)
-            self.entropies[i].append(entropy)
-            class_entropies.append(entropy)
+        # 3. Norm statistics
+        with torch.no_grad():
+            sample_norms = inputs.detach().norm(dim=-1)
+            ones_B = torch.ones(B, device=device)
+            self.norm_sum.scatter_add_(0, true_labels, sample_norms)
+            self.norm_count.scatter_add_(0, true_labels, ones_B)
 
-        # Calculate dynamic gamma values
-        max_semantic_scale = max(semantic_scales) + 1e-6
-        dynamic_gammas = [
-            scale / (1e-6 + max_semantic_scale * entropy)
-            for scale, entropy in zip(semantic_scales, class_entropies)
-        ]
+        # 4. Semantic scales
+        with torch.no_grad():
+            safe_norm_count = self.norm_count.clamp(min=1)
+            avg_magnitudes = self.norm_sum / safe_norm_count
+            semantic_scales = avg_magnitudes ** 2
+            semantic_scales[self.norm_count == 0] = 0.0
+            max_semantic_scale = semantic_scales.max() + 1e-6
 
-        # Calculate the number of predictions for each class
-        current_epoch_class_predictions = torch.tensor([
-            torch.sum((class_predictions == i).float()).item() for i in range(self.num_classes)
-        ])
+        # 5. Class entropies
+        with torch.no_grad():
+            probs_det = probs.detach()
+            sample_entropies = -torch.sum(probs_det * torch.log(probs_det + 1e-6), dim=-1)
+            self.entropy_sum.scatter_add_(0, true_labels, sample_entropies)
+            self.entropy_count.scatter_add_(0, true_labels, ones_B)
+            safe_ent_count = self.entropy_count.clamp(min=1)
+            class_entropies = self.entropy_sum / safe_ent_count
+            class_entropies[self.entropy_count == 0] = 0.0
 
-        # Compute the additional term
-        for i, gamma in enumerate(dynamic_gammas):
-            class_i_predictions = current_epoch_class_predictions[i]
-            if i in self.target_class_index:
-                if self.previous_epoch_class_predictions is not None:
-                    previous_class_i_predictions = self.previous_epoch_class_predictions[i]
-                    reinforcement_term = torch.tensor(0.0)
-                    if class_i_predictions > previous_class_i_predictions:
-                        reinforcement_term = -2.0
-                    elif class_i_predictions < previous_class_i_predictions:
-                        reinforcement_term = 2.0
-                else:
-                    reinforcement_term = torch.tensor(0.0)
-            else:
-                reinforcement_term = torch.tensor(0.0)
+        # 6. Dynamic gammas â€” MODE-DEPENDENT
+        with torch.no_grad():
+            if self.mode == 'no_entropy':
+                dynamic_gammas = semantic_scales / (1.0 + max_semantic_scale)
+                dynamic_gammas = torch.clamp(dynamic_gammas, max=5.0)
+            elif self.mode == 'no_semantic':
+                dynamic_gammas = 1.0 / (1.0 + class_entropies)
+                dynamic_gammas = torch.clamp(dynamic_gammas, max=5.0)
+            else:  # 'full' or 'no_regularizer'
+                dynamic_gammas = semantic_scales / (1.0 + max_semantic_scale * class_entropies)
+            dynamic_gammas = torch.clamp(dynamic_gammas, max=5.0)
 
-            term = (gamma * class_i_predictions + reinforcement_term) ** 2
-            denom = torch.sum((inputs - F.one_hot(torch.tensor(i), num_classes=self.num_classes).float().to(inputs.device)) ** 2) + 1e-6  # Add small value to avoid division by zero
-            additional_term += term / denom
+        # 7. Reinforcement terms â€” MODE-DEPENDENT
+        with torch.no_grad():
+            reinforcement_terms = torch.zeros(C, device=device)
+            if self.mode != 'no_regularizer' and self.previous_epoch_class_predictions is not None:
+                cur = self.current_epoch_class_predictions
+                prev = self.previous_epoch_class_predictions
+                mask = self._target_mask
+                reinforcement_terms[(cur > prev) & mask] = -2.0
+                reinforcement_terms[(cur < prev) & mask] = 2.0
 
-        # Normalize the additional term
-        additional_term /= self.num_classes
-        self.previous_epoch_class_predictions = current_epoch_class_predictions
+        # 8. LDAL loss
+        numerators = (dynamic_gammas * batch_soft_predictions + reinforcement_terms) ** 2
+        detached = inputs.detach()
+        total_sq = (detached ** 2).sum()
+        col_sums = detached.sum(dim=0)
+        denominators = (total_sq - 2.0 * col_sums + B) / (B * C) + 1.0
+        additional_term = (numerators / denominators).sum() / C
 
         return additional_term
 
-class CSLLossFunc(nn.Module):
-    def __init__(self, target_class_index, num_classes):
-        super(CSLLossFunc, self).__init__()
-        self.additional_term_layer = AdditionalTermLayer(target_class_index, num_classes)
+
+class CustomLossWithLDAL(nn.Module):
+    def __init__(self, target_class_index, num_classes, mode='full'):
+        super(CustomLossWithLDAL, self).__init__()
+        self.additional_term_layer = AdditionalTermLayer(target_class_index, num_classes, mode=mode)
 
     def forward(self, y_true, y_pred, epoch):
-        y_true_one_hot = F.one_hot(y_true.squeeze().long(), num_classes=y_pred.size(-1)).float()
-        cross_entropy_loss = F.cross_entropy(y_pred, y_true)
-
+        cross_entropy_loss = F.cross_entropy(y_pred, y_true.squeeze().long())
         additional_term = self.additional_term_layer(y_pred, y_true, epoch)
         total_loss = cross_entropy_loss + additional_term
-
         return total_loss
+
+
+class CEOnlyLoss(nn.Module):
+    """Plain cross-entropy for the baseline variant."""
+    def forward(self, y_true, y_pred, epoch):
+        return F.cross_entropy(y_pred, y_true.squeeze().long())
