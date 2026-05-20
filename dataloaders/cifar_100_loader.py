@@ -14,7 +14,7 @@ def calculate_class_distribution(num_classes, max_samples, mu):
 
 def get_class_indices(dataset):
     class_indices = defaultdict(list)
-    for idx, (_, label) in enumerate(dataset):
+    for idx, label in enumerate(dataset.targets):
         class_indices[label].append(idx)
     return class_indices
 
