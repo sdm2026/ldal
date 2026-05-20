@@ -88,20 +88,6 @@ python main.py --dataset_name inaturalist --model_name resnet50
 - `--learning_rate`: Initial learning rate (default: `0.01`).
 - `--data_path`: Path to the root datasets directory (default: `datasets/`).
 
-### Standard Benchmarks (CIFAR & Tiny ImageNet)
-For rapid experimentation and evaluation on CIFAR and Tiny ImageNet, we provide dedicated Jupyter Notebooks. These notebooks contain complete end-to-end training loops and visualization code.
-
-Start your Jupyter environment:
-```bash
-jupyter notebook
-```
-Navigate to the `notebooks/` directory and execute the desired experiment:
-- `cifar_10.ipynb`
-- `cifar_100.ipynb`
-- `tiny_imagenet.ipynb`
-
----
-
 ##  Repository Structure
 
 ```text
@@ -116,10 +102,6 @@ Navigate to the `notebooks/` directory and execute the desired experiment:
 │   ├── __init__.py
 │   ├── resnet.py               # ResNet backbone implementations
 │   └── resnext.py              # ResNeXt backbone implementations
-├── notebooks/
-│   ├── cifar_10.ipynb          # End-to-end experiment notebook for CIFAR-10-LT
-│   ├── cifar_100.ipynb         # End-to-end experiment notebook for CIFAR-100-LT
-│   └── tiny_imagenet.ipynb     # End-to-end experiment notebook for Tiny ImageNet-LT
 ├── utils/
 │   ├── __init__.py
 │   ├── ldal_loss.py            # PyTorch implementation of the LDAL function
